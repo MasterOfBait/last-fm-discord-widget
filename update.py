@@ -1,5 +1,6 @@
 import json
 import os
+import time
 
 import requests
 from dotenv import load_dotenv
@@ -20,27 +21,40 @@ DISCORD_PROFILE_URL = (
 WEEKLY_LAST_FM_PERIOD = "7day"
 WEEKLY_DISPLAY_PERIOD = "this week"
 IMAGE_FIELD_NAMES = {"latestscrobbleimg"}
+MAX_RETRIES = 3
+RETRY_DELAY_SECONDS = 2
 
 
 def last_fm_get(method, **params):
-    response = requests.get(
-        LAST_FM_API_URL,
-        params={
-            "method": method,
-            "user": LAST_FM_USERNAME,
-            "api_key": API_KEY,
-            "format": "json",
-            **params,
-        },
-        timeout=30,
-    )
-    response.raise_for_status()
-    data = response.json()
+    last_error = None
 
-    if "error" in data:
-        raise ValueError(f"Last.fm API error {data['error']}: {data.get('message', 'Unknown error')}")
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            response = requests.get(
+                LAST_FM_API_URL,
+                params={
+                    "method": method,
+                    "user": LAST_FM_USERNAME,
+                    "api_key": API_KEY,
+                    "format": "json",
+                    **params,
+                },
+                timeout=30,
+            )
+            response.raise_for_status()
+            data = response.json()
 
-    return data
+            if "error" in data:
+                raise ValueError(f"Last.fm API error {data['error']}: {data.get('message', 'Unknown error')}")
+
+            return data
+        except (requests.exceptions.RequestException, ValueError) as error:
+            last_error = error
+            print(f"Last.fm request '{method}' failed on attempt {attempt}/{MAX_RETRIES}: {error}")
+            if attempt < MAX_RETRIES:
+                time.sleep(RETRY_DELAY_SECONDS * attempt)
+
+    raise last_error
 
 
 def first_item(value):
